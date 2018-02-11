@@ -7,6 +7,8 @@ import java.awt.GridLayout;
 import java.awt.dnd.DropTarget;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.ItemEvent;
+import java.awt.event.ItemListener;
 import java.io.File;
 import java.text.MessageFormat;
 import java.util.ArrayList;
@@ -22,7 +24,6 @@ import javax.swing.JPasswordField;
 import javax.swing.JTextField;
 import org.wiztools.commons.StringUtil;
 import org.wiztools.restclient.bean.KeyStoreType;
-import static org.wiztools.restclient.bean.KeyStoreType.*;
 import org.wiztools.restclient.bean.SSLKeyStore;
 import org.wiztools.restclient.bean.SSLKeyStoreBean;
 import org.wiztools.restclient.ui.EscapableDialog;
@@ -65,6 +66,19 @@ public class KeyStoreDialog extends EscapableDialog {
     
     @PostConstruct
     protected void init() {
+        // Init:
+        jp_type.addItemListener(new ItemListener() {
+            @Override
+            public void itemStateChanged(ItemEvent e) {
+                if(e.getStateChange() == ItemEvent.SELECTED) {
+                    jpf_pwd.setEnabled(false);
+                }
+                else {
+                    jpf_pwd.setEnabled(true);
+                }
+            }
+        }, KeyStoreType.PEM);
+        
         // DnD:
         FileDropTargetListener dndListener = new FileDropTargetListener();
         dndListener.addDndAction(new DndAction() {
@@ -146,33 +160,27 @@ public class KeyStoreDialog extends EscapableDialog {
     private static final String fmtChangeMsg = "Keystore seems to be in {0} format.\nWant to update the format to {0}?";
     private static final String fmtChangeDialogTitle = "Change `Format' to {0}?";
     
+    private void storeTypeUsingDetectedExtn(KeyStoreType detectedType) {
+        if(jp_type.getSelectedKeyStoreType() != detectedType) {
+            final int result = JOptionPane.showConfirmDialog(this,
+                    MessageFormat.format(fmtChangeMsg, detectedType),
+                    MessageFormat.format(fmtChangeDialogTitle, detectedType),
+                    JOptionPane.YES_NO_OPTION);
+            if(result == JOptionPane.YES_OPTION) {
+                jp_type.setSelectedKeyStoreType(detectedType);
+            }
+        }
+    }
+    
     private void loadFile(File f) {
         if(f == null) {
             // do nothing--cancel pressed
         }
         else if(f.canRead()) {
             final String fileName = f.getName();
-            if(fileName.endsWith(".p12") || fileName.endsWith(".pfx")) {
-                if(jp_type.getSelectedKeyStoreType() == JKS) {
-                    final int result = JOptionPane.showConfirmDialog(this,
-                            MessageFormat.format(fmtChangeMsg, PKCS12),
-                            MessageFormat.format(fmtChangeDialogTitle, PKCS12),
-                            JOptionPane.YES_NO_OPTION);
-                    if(result == JOptionPane.YES_OPTION) {
-                        jp_type.setSelectedKeyStoreType(PKCS12);
-                    }
-                }
-            }
-            else if(fileName.endsWith(".jks")) {
-                if(jp_type.getSelectedKeyStoreType() == PKCS12) {
-                    final int result = JOptionPane.showConfirmDialog(this,
-                            MessageFormat.format(fmtChangeMsg, JKS),
-                            MessageFormat.format(fmtChangeDialogTitle, JKS),
-                            JOptionPane.YES_NO_OPTION);
-                    if(result == JOptionPane.YES_OPTION) {
-                        jp_type.setSelectedKeyStoreType(JKS);
-                    }
-                }
+            final KeyStoreType detectedStoreType = KeyStoreType.detectByExtn(fileName);
+            if(detectedStoreType != null) {
+                storeTypeUsingDetectedExtn(detectedStoreType);
             }
             jtf_file.setText(f.getAbsolutePath());
         }
@@ -185,7 +193,10 @@ public class KeyStoreDialog extends EscapableDialog {
         if(store != null) {
             jp_type.setSelectedKeyStoreType(store.getType());
             jtf_file.setText(store.getFile().getAbsolutePath());
-            jpf_pwd.setText(new String(store.getPassword()));
+            if(store.getType() != KeyStoreType.PEM)
+                jpf_pwd.setText(new String(store.getPassword()));
+            else
+                jpf_pwd.setText("");
         }
         else {
             clear();

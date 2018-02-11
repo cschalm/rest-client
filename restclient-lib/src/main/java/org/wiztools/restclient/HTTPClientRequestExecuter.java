@@ -9,10 +9,12 @@ import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
+import java.security.spec.InvalidKeySpecException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
 import org.apache.http.*;
 import org.apache.http.auth.AuthScope;
@@ -26,13 +28,16 @@ import org.apache.http.client.config.CookieSpecs;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.*;
 import org.apache.http.client.protocol.HttpClientContext;
+import org.apache.http.conn.ssl.DefaultHostnameVerifier;
+import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
-import org.apache.http.conn.ssl.SSLContextBuilder;
-import org.apache.http.conn.ssl.TrustSelfSignedStrategy;
+import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.http.conn.ssl.TrustStrategy;
-import org.apache.http.conn.ssl.X509HostnameVerifier;
 import org.apache.http.entity.AbstractHttpEntity;
+import org.apache.http.entity.mime.FormBodyPartBuilder;
+import org.apache.http.entity.mime.HttpMultipartMode;
 import org.apache.http.entity.mime.MultipartEntityBuilder;
+import org.apache.http.entity.mime.content.ContentBody;
 import org.apache.http.entity.mime.content.FileBody;
 import org.apache.http.entity.mime.content.StringBody;
 import org.apache.http.impl.auth.AuthSchemeBase;
@@ -52,6 +57,7 @@ import org.wiztools.commons.StreamUtil;
 import org.wiztools.commons.StringUtil;
 import org.wiztools.restclient.bean.*;
 import org.wiztools.restclient.http.RESTClientCookieStore;
+import org.wiztools.restclient.http.TrustAllTrustStrategy;
 import org.wiztools.restclient.util.HttpUtil;
 import org.wiztools.restclient.util.IDNUtil;
 import org.wiztools.restclient.util.Util;
@@ -97,35 +103,8 @@ public class HTTPClientRequestExecuter implements RequestExecuter {
         // Create all the builder objects:
         final HttpClientBuilder hcBuilder = HttpClientBuilder.create();
         final RequestConfig.Builder rcBuilder = RequestConfig.custom();
-        final RequestBuilder reqBuilder;
-        switch(request.getMethod()){
-            case GET:
-                reqBuilder = RequestBuilder.get();
-                break;
-            case POST:
-                reqBuilder = RequestBuilder.post();
-                break;
-            case PUT:
-                reqBuilder = RequestBuilder.put();
-                break;
-            case PATCH:
-                reqBuilder = RequestBuilder.create("PATCH");
-                break;
-            case DELETE:
-                reqBuilder = RequestBuilder.delete();
-                break;
-            case HEAD:
-                reqBuilder = RequestBuilder.head();
-                break;
-            case OPTIONS:
-                reqBuilder = RequestBuilder.options();
-                break;
-            case TRACE:
-                reqBuilder = RequestBuilder.trace();
-                break;
-            default:
-                throw new IllegalStateException("Method not defined!");
-        }
+        final RequestBuilder reqBuilder = RequestBuilder.create(
+                request.getMethod().name());
         
         // Retry handler (no-retries):
         hcBuilder.setRetryHandler(new DefaultHttpRequestRetryHandler(0, false));
@@ -147,10 +126,8 @@ public class HTTPClientRequestExecuter implements RequestExecuter {
 
         // Set request timeout (default 1 minute--60000 milliseconds)
         IGlobalOptions options = ServiceLocator.getInstance(IGlobalOptions.class);
-        options.acquire();
         rcBuilder.setConnectionRequestTimeout(
                 Integer.parseInt(options.getProperty("request-timeout-in-millis")));
-        options.release();
 
         // Set proxy
         ProxyConfig proxy = ProxyConfig.getInstance();
@@ -255,7 +232,7 @@ public class HTTPClientRequestExecuter implements RequestExecuter {
             // Cookies
             {
                 // Set cookie policy:
-                rcBuilder.setCookieSpec(CookieSpecs.BEST_MATCH);
+                rcBuilder.setCookieSpec(CookieSpecs.DEFAULT);
                 
                 // Add to CookieStore:
                 CookieStore store = new RESTClientCookieStore();
@@ -290,33 +267,61 @@ public class HTTPClientRequestExecuter implements RequestExecuter {
                             ReqEntityMultipart multipart = (ReqEntityMultipart)bean;
                             
                             MultipartEntityBuilder meb = MultipartEntityBuilder.create();
+                            
+                            // multipart/mixed / multipart/form-data:
+                            meb.setMimeSubtype(multipart.getSubtype().toString());
+                            
+                            // Format:
+                            MultipartMode mpMode = multipart.getMode();
+                            switch(mpMode) {
+                                case BROWSER_COMPATIBLE:
+                                    meb.setMode(HttpMultipartMode.BROWSER_COMPATIBLE);
+                                    break;
+                                case RFC_6532:
+                                    meb.setMode(HttpMultipartMode.RFC6532);
+                                    break;
+                                case STRICT:
+                                    meb.setMode(HttpMultipartMode.STRICT);
+                                    break;
+                            }
+                            
+                            // Parts:
                             for(ReqEntityPart part: multipart.getBody()) {
+                                ContentBody cb = null;
                                 if(part instanceof ReqEntityStringPart) {
                                     ReqEntityStringPart p = (ReqEntityStringPart)part;
                                     String body = p.getPart();
                                     ContentType ct = p.getContentType();
-                                    final StringBody sb;
                                     if(ct != null) {
-                                        sb = new StringBody(body, HTTPClientUtil.getContentType(ct));
+                                        cb = new StringBody(body, HTTPClientUtil.getContentType(ct));
                                     }
                                     else {
-                                        sb = new StringBody(body, org.apache.http.entity.ContentType.DEFAULT_TEXT);
+                                        cb = new StringBody(body, org.apache.http.entity.ContentType.DEFAULT_TEXT);
                                     }
-                                    meb.addPart(part.getName(), sb);
+                                
                                 }
                                 else if(part instanceof ReqEntityFilePart) {
                                     ReqEntityFilePart p = (ReqEntityFilePart)part;
                                     File body = p.getPart();
                                     ContentType ct = p.getContentType();
-                                    final FileBody fb;
                                     if(ct != null) {
-                                        fb = new FileBody(body, HTTPClientUtil.getContentType(ct), p.getFilename());
+                                        cb = new FileBody(body, HTTPClientUtil.getContentType(ct), p.getFilename());
                                     }
                                     else {
-                                        fb = new FileBody(body, org.apache.http.entity.ContentType.DEFAULT_BINARY, p.getFilename());
+                                        cb = new FileBody(body, org.apache.http.entity.ContentType.DEFAULT_BINARY, p.getFilename());
                                     }
-                                    meb.addPart(p.getName(), fb);
                                 }
+                                FormBodyPartBuilder bodyPart = FormBodyPartBuilder
+                                        .create()
+                                        .setName(part.getName())
+                                        .setBody(cb);
+                                MultiValueMap<String, String> fields = part.getFields();
+                                for(String key: fields.keySet()) {
+                                    for(String value: fields.get(key)) {
+                                        bodyPart.addField(key, value);
+                                    }
+                                }
+                                meb.addPart(bodyPart.build());
                             }
                             
                             reqBuilder.setEntity(meb.build());
@@ -340,19 +345,14 @@ public class HTTPClientRequestExecuter implements RequestExecuter {
             final SSLReq sslReq = request.getSslReq();
             if(sslReq != null) {
                 SSLHostnameVerifier verifier = sslReq.getHostNameVerifier();
-                final X509HostnameVerifier hcVerifier;
-                switch(verifier){
-                    case STRICT:
-                        hcVerifier = SSLConnectionSocketFactory.STRICT_HOSTNAME_VERIFIER;
-                        break;
-                    case BROWSER_COMPATIBLE:
-                        hcVerifier = SSLConnectionSocketFactory.BROWSER_COMPATIBLE_HOSTNAME_VERIFIER;
-                        break;
+                final HostnameVerifier hcVerifier;
+                switch(verifier) {
                     case ALLOW_ALL:
-                        hcVerifier = SSLConnectionSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER;
+                        hcVerifier = new NoopHostnameVerifier();
                         break;
+                    case STRICT:
                     default:
-                        hcVerifier = SSLConnectionSocketFactory.STRICT_HOSTNAME_VERIFIER;
+                        hcVerifier = new DefaultHostnameVerifier();
                         break;
                 }
 
@@ -364,14 +364,14 @@ public class HTTPClientRequestExecuter implements RequestExecuter {
                         null:
                         sslReq.getKeyStore().getKeyStore();
 
-                final TrustStrategy trustStrategy = sslReq.isTrustSelfSignedCert()
-                        ? new TrustSelfSignedStrategy(): null;
+                final TrustStrategy trustStrategy = sslReq.isTrustAllCerts()
+                        ? new TrustAllTrustStrategy(): null;
                 
                 SSLContext ctx = new SSLContextBuilder()
                         .loadKeyMaterial(keyStore, sslReq.getKeyStore()!=null? sslReq.getKeyStore().getPassword(): null)
                         .loadTrustMaterial(trustStore, trustStrategy)
                         .setSecureRandom(null)
-                        .useTLS()
+                        .useProtocol("TLS")
                         .build();
                 SSLConnectionSocketFactory sf = new SSLConnectionSocketFactory(ctx, hcVerifier);
                 hcBuilder.setSSLSocketFactory(sf);
@@ -445,7 +445,7 @@ public class HTTPClientRequestExecuter implements RequestExecuter {
                 view.doResponse(response);
             }
         }
-        catch (IOException | KeyStoreException | NoSuchAlgorithmException | CertificateException | UnrecoverableKeyException | KeyManagementException | IllegalStateException ex) {
+        catch (IOException | KeyStoreException | InvalidKeySpecException | NoSuchAlgorithmException | CertificateException | UnrecoverableKeyException | KeyManagementException | IllegalStateException ex) {
             if(!interruptedShutdown){
                 for(View view: views){
                     view.doError(Util.getStackTrace(ex));

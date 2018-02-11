@@ -28,6 +28,7 @@ public final class UIUtil {
             RCUIConstants.getUIFontSizeDefault());
     public static final Font FONT_MONO_PLAIN = new Font(Font.MONOSPACED, Font.PLAIN,
             RCUIConstants.getUIFontSizeDefault());
+    public static final Font FONT_BIG = new Font(Font.DIALOG, Font.PLAIN, 18);
     
     public static final String LAST_CWD_REQ = "filesystem.lastdir.request";
     public static final String LAST_CWD_RES = "filesystem.lastdir.response";
@@ -83,5 +84,16 @@ public final class UIUtil {
     public static void clipboardCopy(String str) {
         Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
         clipboard.setContents(new StringSelection(str), null);
+    }
+    
+    public static boolean hasRetinaDisplay() {
+        Object obj = Toolkit.getDefaultToolkit()
+                .getDesktopProperty("apple.awt.contentScaleFactor");
+        if (obj instanceof Float) {
+            Float f = (Float) obj;
+            int scale = f.intValue();
+            return (scale == 2);
+        }
+        return false;
     }
 }

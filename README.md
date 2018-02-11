@@ -11,11 +11,9 @@ RESTClient is a Java application to test RESTful webservices. It can be used to 
 
 The first version of RESTClient was released late 2007. Since then the tool has been in continuous development. Visit [project news page](https://github.com/wiztools/rest-client/wiki/News) for history of releases.
 
-### Download | Purchase
+### Download
 
-Preferred binary download host: [FossHub](http://code.fosshub.com/WizToolsorg-RESTClient/downloads). Archives of earlier releases available at [Google Code](https://code.google.com/p/rest-client/downloads/list).
-
-RESTClient Signed Mac build is also available for purchase from [FastSpring store](http://sites.fastspring.com/wiztools/product/restclient). Read [this FAQ](https://github.com/wiztools/rest-client/wiki/Mac-Build-FAQ) for details. Your support for the project ensures its continued development.
+Get from [releases](https://github.com/wiztools/rest-client/releases). Archives of earlier releases made are at [WizTools.org Download](http://download.wiztools.org/rest-client/archive/index.html).
 
 ### Support
 
@@ -29,9 +27,9 @@ One source of revenue for this project is from sale of this book. Show your supp
 
 ### Screenshot
 
-3.4 release:
+3.6 release:
 
-[![](https://farm4.staticflickr.com/3873/14642040167_92b91796e1_b.jpg)](https://www.flickr.com/photos/subwiz/14642040167)
+[![](https://c2.staticflickr.com/8/7274/26722005544_e0e7067636_o.png)](https://www.flickr.com/photos/subwiz/26722005544/)
 
 More screenshots here: http://flickr.com/photos/subwiz/tags/restclient/
 
@@ -40,7 +38,5 @@ More screenshots here: http://flickr.com/photos/subwiz/tags/restclient/
 Releases and product information is published in the following channels:
 
 * [Blog](http://blog.wiztools.org/)
-* [Google+](https://plus.google.com/b/107749935334365269480/)
 * [Facebook](https://www.facebook.com/wiztools.org)
-* [FreeCode](http://freecode.com/projects/restclient/)
-
+* [Google+](https://plus.google.com/b/107749935334365269480/)

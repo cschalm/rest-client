@@ -130,11 +130,19 @@ public final class HttpUtil {
                 || ct.equals("image/gif");
     }
     
+    // All text content that needs to be rendered as text except those
+    // starting with `text/`:
+    private static List<String> TEXT_CT = Arrays.asList(new String[]{
+        "application/x-javascript", "application/javascript"
+    });
+    
     public static boolean isTextContentType(final String contentType) {
         final String ct = getContentTypeBeforeSemiColon(contentType);
         return ct.startsWith("text/")
                 || isXmlContentType(ct)
-                || isJsonContentType(ct);
+                || isJsonContentType(ct)
+                || isFormUrlEncodedContentType(ct)
+                || TEXT_CT.contains(ct);
     }
     
     public static boolean isXmlContentType(final String contentType) {
@@ -149,11 +157,28 @@ public final class HttpUtil {
         return ct.startsWith("application/json")
                 || ct.endsWith("+json");
     }
+    
+    public static boolean isJsContentType(final String contentType) {
+        final String ct = getContentTypeBeforeSemiColon(contentType);
+        return ct.startsWith("application/javascript")
+                || ct.startsWith("application/x-javascript")
+                || ct.startsWith("text/javascript");
+    }
+    
+    public static boolean isCssContentType(final String contentType) {
+        final String ct = getContentTypeBeforeSemiColon(contentType);
+        return ct.startsWith("text/css");
+    }
 
     public static boolean isHTMLContentType(final String contentType) {
         final String ct = getContentTypeBeforeSemiColon(contentType);
         return ct.startsWith("text/html")
                 || ct.endsWith("+html");
+    }
+
+    public static boolean isFormUrlEncodedContentType(final String contentType) {
+        final String ct = getContentTypeBeforeSemiColon(contentType);
+        return ct.startsWith("application/x-www-form-urlencoded");
     }
 
     public static Charset getCharsetDefault(final ContentType type) {
@@ -164,7 +189,7 @@ public final class HttpUtil {
     
     private static final List<String> entityEnclosingMethods = 
             Collections.unmodifiableList(
-                    Arrays.asList(new String[]{"POST", "PUT", "PATCH", "DELETE"}));
+                    Arrays.asList(new String[]{"GET", "POST", "PUT", "PATCH", "DELETE"}));
     public static boolean isEntityEnclosingMethod(final String method) {
         return entityEnclosingMethods.contains(method);
     }

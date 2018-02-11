@@ -5,7 +5,6 @@ import java.awt.Container;
 import java.awt.Font;
 import java.awt.dnd.DropTarget;
 import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.io.File;
 import java.net.HttpCookie;
 import java.net.MalformedURLException;
@@ -27,7 +26,6 @@ import org.wiztools.commons.StringUtil;
 import org.wiztools.restclient.IGlobalOptions;
 import org.wiztools.restclient.ServiceLocator;
 import org.wiztools.restclient.bean.*;
-import org.wiztools.restclient.ui.dnd.DndAction;
 import org.wiztools.restclient.ui.dnd.FileDropTargetListener;
 import org.wiztools.restclient.ui.history.HistoryManager;
 import org.wiztools.restclient.ui.reqauth.ReqAuthPanel;
@@ -39,8 +37,10 @@ import org.wiztools.restclient.ui.reqmethod.ReqMethodPanel;
 import org.wiztools.restclient.ui.reqtest.ReqTestPanel;
 import org.wiztools.restclient.ui.resbody.ResBodyPanel;
 import org.wiztools.restclient.ui.resheader.ResHeaderPanel;
+import org.wiztools.restclient.ui.resstats.ResStatsPanel;
 import org.wiztools.restclient.ui.resstatus.ResStatusPanel;
 import org.wiztools.restclient.ui.restest.ResTestPanel;
+import org.wiztools.restclient.util.ContentTypesCommon;
 import org.wiztools.restclient.util.HttpUtil;
 import org.wiztools.restclient.util.Util;
 
@@ -71,6 +71,7 @@ public class RESTViewImpl extends JPanel implements RESTView {
     @Inject private ResHeaderPanel jp_res_headers;
     @Inject private ResBodyPanel jp_res_body;
     @Inject private ResTestPanel jp_res_test;
+    @Inject private ResStatsPanel jp_res_stats;
 
     @Inject private MessageDialog messageDialog;
     @Inject private RESTUserInterface rest_ui;
@@ -94,7 +95,8 @@ public class RESTViewImpl extends JPanel implements RESTView {
         jtp.addTab("Method", jp_req_method.getComponent());
         
         // Headers Tab
-        jp_2col_req_headers = new TwoColumnTablePanel(new String[]{"Header", "Value"}, rest_ui);
+        jp_2col_req_headers = new TwoColumnTablePanel(
+                new String[]{"Header", "Value"}, ContentTypesCommon.getCommon(), rest_ui);
         jtp.addTab("Header", jp_2col_req_headers);
         
         // Cookies Tab
@@ -102,7 +104,6 @@ public class RESTViewImpl extends JPanel implements RESTView {
         jtp.addTab("Cookie", jp_2col_req_cookies);
         
         // Body Tab
-        jp_req_body.disableBody(); // disable control by default
         jtp.addTab("Body", jp_req_body.getComponent());
         
         // Auth
@@ -132,6 +133,9 @@ public class RESTViewImpl extends JPanel implements RESTView {
         // Test result
         jtp.addTab("Test Result", jp_res_test.getComponent());
         
+        // Stats
+        jtp.addTab("Stats", jp_res_stats.getComponent());
+        
         return jtp;
     }
     
@@ -142,11 +146,8 @@ public class RESTViewImpl extends JPanel implements RESTView {
         jp.setLayout(new BorderLayout(BORDER_WIDTH, BORDER_WIDTH));
         
         // North
-        jp_url_go.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent ae) {
-                jb_requestActionPerformed();
-            }
+        jp_url_go.addActionListener((ActionEvent ae) -> {
+            jb_requestActionPerformed();
         });
         jp.add(jp_url_go.getComponent(), BorderLayout.NORTH);
         
@@ -178,11 +179,8 @@ public class RESTViewImpl extends JPanel implements RESTView {
     protected void init() {
         // DnD:
         FileDropTargetListener l = new FileDropTargetListener();
-        l.addDndAction(new DndAction() {
-            @Override
-            public void onDrop(List<File> files) {
-                FileOpenUtil.open(view, files.get(0));
-            }
+        l.addDndAction((List<File> files) -> {
+            FileOpenUtil.open(view, files.get(0));
         });
         new DropTarget(this, l);
         
@@ -235,12 +233,13 @@ public class RESTViewImpl extends JPanel implements RESTView {
         response.setStatusLine(statusLine);
         response.setStatusCode(HttpUtil.getStatusCodeFromStatusLine(statusLine));
         MultiValueMap<String, String> headers = jp_res_headers.getHeaders();
-        for(String key: headers.keySet()){
-            for(String value: headers.get(key)) {
+        headers.keySet().stream().forEach((String key) -> {
+            headers.get(key).stream().forEach((value) -> {
                 response.addHeader(key, value);
-            }
-        }
+            });
+        });
         response.setTestResult(jp_res_test.getTestResult());
+        response.setExecutionTime(jp_res_stats.getExecutionTime());
         return response;
     }
     
@@ -264,16 +263,19 @@ public class RESTViewImpl extends JPanel implements RESTView {
         
         // Method
         HTTPMethod method = jp_req_method.getSelectedMethod();
+        if(StringUtil.isEmpty(method.name())) {
+            throw new IllegalStateException("HTTP method name is empty.");
+        }
         request.setMethod(method);
         
         { // Get request headers
             MultiValueMap<String, String> headers = jp_2col_req_headers.getData();
-            for(final String key: headers.keySet()) {
+            headers.keySet().stream().forEach((key) -> {
                 Collection<String> values = headers.get(key);
-                for(final String value: values) {
+                values.stream().forEach((value) -> {
                     request.addHeader(key, value);
-                }
-            }
+                });
+            });
         }
         
         { // Cookies
@@ -369,64 +371,49 @@ public class RESTViewImpl extends JPanel implements RESTView {
         historyManager.add(request);
         
         // UI control:
-        SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-                jp_status_bar.showProgressBar();
-                jp_status_bar.setStatus("Processing request...");
-                jp_url_go.setAsRunning();
-            }
+        SwingUtilities.invokeLater(() -> {
+            jp_status_bar.showProgressBar();
+            jp_status_bar.setStatus("Processing request...");
+            jp_url_go.setAsRunning();
         });
     }
     
     @Override
     public void doResponse(final Response response) {
-        SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-                // Update the UI:
-                setUIFromResponse(response);
-                
-                // Set lastResponse:
-                lastResponse = response;
-
-                // Update status message
-                final int bodyLength = response.getResponseBody() != null? response.getResponseBody().length: 0;
-                setStatusMessage("Response time: " + response.getExecutionTime() + " ms"
-                        + "; body-size: " + bodyLength + " byte(s)");
-            }
+        SwingUtilities.invokeLater(() -> {
+            // Update the UI:
+            setUIFromResponse(response);
+            
+            // Set lastResponse:
+            lastResponse = response;
+            
+            // Update status message
+            final int bodyLength = response.getResponseBody() != null? response.getResponseBody().length: 0;
+            setStatusMessage("Response time: " + response.getExecutionTime() + " ms"
+                    + "; body-size: " + bodyLength + " byte(s)");
         });
     }
     
     @Override
     public void doCancelled(){
-        SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-                setStatusMessage("Request cancelled!");
-            }
+        SwingUtilities.invokeLater(() -> {
+            setStatusMessage("Request cancelled!");
         });
     }
     
     @Override
     public void doEnd(){
-        SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-                jp_status_bar.hideProgressBar();
-                jp_url_go.setAsIdle();
-            }
+        SwingUtilities.invokeLater(() -> {
+            jp_status_bar.hideProgressBar();
+            jp_url_go.setAsIdle();
         });
     }
     
     @Override
     public void doError(final String error){
-        SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-                showError(error);
-                setStatusMessage("An error occurred during request.");
-            }
+        SwingUtilities.invokeLater(() -> {
+            showError(error);
+            setStatusMessage("An error occurred during request.");
         });
         
     }
@@ -453,6 +440,7 @@ public class RESTViewImpl extends JPanel implements RESTView {
         jp_res_body.clear();
         jp_res_headers.clear();
         jp_res_test.clear();
+        jp_res_stats.clear();
     }
     
     @Override
@@ -470,10 +458,7 @@ public class RESTViewImpl extends JPanel implements RESTView {
     // This is just a UI convenience method.
     private void correctRequestURL(){
         String str = jp_url_go.getUrlString();
-        if(StringUtil.isEmpty(str)){
-            return;
-        }
-        else{
+        if(StringUtil.isNotEmpty(str)) {
             String t = str.toLowerCase();
             if(!(t.startsWith("http://") 
                     || t.startsWith("https://")
@@ -485,7 +470,7 @@ public class RESTViewImpl extends JPanel implements RESTView {
     }
     
     private List<String> validateRequest(Request request){
-        List<String> errors = new ArrayList<String>();
+        List<String> errors = new ArrayList<>();
 
         // Check URL
         if(request.getUrl() == null){
@@ -503,10 +488,8 @@ public class RESTViewImpl extends JPanel implements RESTView {
         if(jp_req_method.doesSelectedMethodSupportEntityBody()) {
             ReqEntity entity = jp_req_body.getEntity();
             if(entity instanceof ReqEntitySimple) {
-                if(entity != null) {
-                    if(((ReqEntitySimple)entity).getContentType() == null) {
-                        errors.add("Content type not set for body.");
-                    }
+                if(((ReqEntitySimple)entity).getContentType() == null) {
+                    errors.add("Content type not set for body.");
                 }
             }
         }
@@ -563,6 +546,10 @@ public class RESTViewImpl extends JPanel implements RESTView {
 
         // Response test result
         jp_res_test.setTestResult(response.getTestResult());
+        
+        // Stats:
+        jp_res_stats.setBodySize(response.getResponseBody().length);
+        jp_res_stats.setExecutionTime(response.getExecutionTime());
     }
     
     @Override
@@ -583,7 +570,7 @@ public class RESTViewImpl extends JPanel implements RESTView {
         
         // Cookies
         List<HttpCookie> cookies = request.getCookies();
-        MultiValueMap<String, String> cookiesMap = new MultiValueMapArrayList<String, String>();
+        MultiValueMap<String, String> cookiesMap = new MultiValueMapArrayList<>();
         
         int version = CookieVersion.DEFAULT_VERSION.getIntValue();
         for(HttpCookie cookie: cookies) {

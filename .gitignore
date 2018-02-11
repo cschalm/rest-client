@@ -2,4 +2,11 @@
 /restclient-lib/target/
 /restclient-ui/target/
 /restclient-cli/target/
+/restclient-jfx/target/
 /target/
+/build/
+**/build/
+.idea
+*.iml
+.gradle
+/.nb-gradle/

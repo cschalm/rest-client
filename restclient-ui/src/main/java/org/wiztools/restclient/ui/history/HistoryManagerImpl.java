@@ -4,15 +4,18 @@ import java.io.File;
 import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.annotation.PostConstruct;
 import javax.inject.Inject;
 import javax.inject.Singleton;
-import org.wiztools.restclient.XMLException;
+import org.wiztools.restclient.IGlobalOptions;
+import org.wiztools.restclient.persistence.XMLException;
 import org.wiztools.restclient.bean.Request;
 import org.wiztools.restclient.ui.lifecycle.LifecycleManager;
 import org.wiztools.restclient.ui.lifecycle.Shutdown;
-import org.wiztools.restclient.util.XMLCollectionUtil;
+import org.wiztools.restclient.ui.reqgo.ReqUrlGoPanel;
+import org.wiztools.restclient.persistence.XMLCollectionUtil;
 
 /**
  *
@@ -22,12 +25,14 @@ import org.wiztools.restclient.util.XMLCollectionUtil;
 public class HistoryManagerImpl implements HistoryManager {
     private static final Logger LOG = Logger.getLogger(HistoryManagerImpl.class.getName());
     
-    private int maxSize = DEFAULT_HISTORY_SIZE;
+    private int maxSize = DEFAULT_HISTORY_SIZE; // initialized in @PostConstruct
     private int cursor;
     
-    private final LinkedList<Request> data = new LinkedList<Request>();
+    private final LinkedList<Request> data = new LinkedList<>();
     
+    @Inject private IGlobalOptions options;
     @Inject private LifecycleManager lifecycle;
+    @Inject private ReqUrlGoPanel goPanel;
 
     @PostConstruct
     protected void init() {
@@ -36,10 +41,7 @@ public class HistoryManagerImpl implements HistoryManager {
             try {
                 load(DEFAULT_FILE);
             }
-            catch(IOException ex) {
-                ex.printStackTrace(System.err);
-            }
-            catch(XMLException ex) {
+            catch(IOException | XMLException ex) {
                 ex.printStackTrace(System.err);
             }
         }
@@ -56,6 +58,42 @@ public class HistoryManagerImpl implements HistoryManager {
                 }
             }
         });
+        
+        initMaxSize();
+    }
+    
+    // @PostConstruct -- sequence important, so called from init()
+    protected void initMaxSize() {
+        String tSize = options.getProperty(HISTORY_SIZE_CONFIG_KEY);
+        if(tSize != null) {
+            try {
+                int size = Integer.parseInt(tSize);
+                if(size > 0) {
+                    if(size > 50) {
+                        LOG.info("History size is configured to greater than 50! Ensure you have enough memory!!");
+                    }
+                    setHistorySize(size);
+                    return;
+                }
+                else {
+                    LOG.log(Level.INFO, "History size is less than 1: {0}", size);
+                }
+            }
+            catch(NumberFormatException ex) {
+                LOG.info("Expected integer property: " + HISTORY_SIZE_CONFIG_KEY);
+            }
+        }
+        LOG.log(Level.INFO, "Reverting to default value: {0}", DEFAULT_HISTORY_SIZE);
+        setHistorySize(DEFAULT_HISTORY_SIZE);
+        
+        updateOptions();
+    }
+    
+    private void updateOptions() {
+        // Update options to persist during shutdown:
+        if(options != null) { // should not fail tests!
+            options.setProperty(HISTORY_SIZE_CONFIG_KEY, String.valueOf(maxSize));
+        }
     }
     
     @Override
@@ -68,9 +106,15 @@ public class HistoryManagerImpl implements HistoryManager {
         if(size < 1) {
             throw new IllegalArgumentException("History max size value invalid: " + size);
         }
+        
+        if(size > 50) { // warning log
+            LOG.info("History size is configured to greater than 50! Ensure you have enough memory!!");
+        }
+        
         if(maxSize == size) {
             return;
         }
+        
         if(maxSize > size) { // new size is smaller than existing
             // reset cursor:
             if(cursor >= size) {
@@ -90,6 +134,8 @@ public class HistoryManagerImpl implements HistoryManager {
         
         // Finally, set the size:
         maxSize = size;
+        
+        updateOptions();
     }
     
     @Override
@@ -117,18 +163,12 @@ public class HistoryManagerImpl implements HistoryManager {
         if(data.isEmpty()) {
             return true;
         }
-        if(cursor == (data.size() - 1)) {
-            return true;
-        }
-        return false;
+        return cursor == (data.size() - 1);
     }
     
     @Override
     public boolean isMostRecent() {
-        if(cursor == 0) {
-            return true;
-        }
-        return false;
+        return cursor == 0;
     }
     
     @Override
@@ -167,6 +207,9 @@ public class HistoryManagerImpl implements HistoryManager {
     public void clear() {
         data.clear();
         cursor = 0;
+        
+        // remove combo history too:
+        goPanel.clearHistory();
     }
     
     @Override
